@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ],
+  "functions": {
+    "api/naver-search.js": { "regions": ["icn1"] },
+    "api/naver-place-menu.js": { "regions": ["icn1"] }
+  }
+}
