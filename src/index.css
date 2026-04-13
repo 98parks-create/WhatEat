@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: #f8f9fa;
+  color: #1a1a1a;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  min-height: 100svh;
+}
+
+/* 전역 버튼 호버/커서 */
+button:not(:disabled) {
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s, background-color 0.15s, color 0.15s;
+}
+button:not(:disabled):hover {
+  opacity: 0.88;
+}
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+button:disabled {
+  cursor: not-allowed;
+}
+a {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+a:hover {
+  opacity: 0.8;
+}
