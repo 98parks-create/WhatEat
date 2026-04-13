@@ -9,6 +9,12 @@ import AddRestaurantModal from '../components/AddRestaurantModal'
 const CATEGORIES = ['전체', '한식', '중식', '일식', '양식', '분식', '카페']
 const PRICE_RANGES = ['전체', '~8천원', '~10천원', '~15천원', '~25천원']
 
+function isCafe(r) {
+  const cat = r.category_name || r.category || ''
+  return cat.includes('카페') || cat.includes('커피') || cat.includes('음료') ||
+    cat.includes('디저트') || cat.includes('베이커리') || cat.includes('제과') || cat.includes('카페/')
+}
+
 export default function MapPage() {
   const mapRef = useRef(null)
   const kakaoMap = useRef(null)
@@ -217,6 +223,7 @@ export default function MapPage() {
         })
 
         const cheapRegistered = registeredList.filter((r) => {
+          if (isCafe(r)) return false
           const menus = menuMap[r.kakao_id]?.filter((m) => m.price)
           return menus?.length && menus[0].price <= 8000
         }).map((r) => {
@@ -260,7 +267,8 @@ export default function MapPage() {
         const kakaoMerged = categoryFiltered.map((r) => {
           const extra = dbData?.find((d) => d.kakao_id === r.id)
           const menus = menuMap[r.id]?.filter((m) => m.price) || []
-          const cheapMenu = menus.find((m) => m.price <= 8000)
+          const mainMenu = !isCafe(r) && menus.length > 0 ? menus[0] : null
+          const cheapMenu = mainMenu && mainMenu.price <= 8000 ? mainMenu : null
           return {
             ...r,
             ...extra,
@@ -273,7 +281,8 @@ export default function MapPage() {
 
         const registeredMerged = uniqueRegistered.map((r) => {
           const menus = menuMap[r.kakao_id]?.filter((m) => m.price) || []
-          const cheapMenu = menus.find((m) => m.price <= 8000)
+          const mainMenu = !isCafe(r) && menus.length > 0 ? menus[0] : null
+          const cheapMenu = mainMenu && mainMenu.price <= 8000 ? mainMenu : null
           return { ...r, _menus: menuMap[r.kakao_id] || [], ...(cheapMenu && { _isCheap: true, _cheapPrice: cheapMenu.price }) }
         })
 

@@ -46,20 +46,32 @@ function priceToRange(price) {
   return '~25천원'
 }
 
+function isCafeCat(r) {
+  const cat = r.category_name || r.category || ''
+  return cat.includes('카페') || cat.includes('커피') || cat.includes('음료') ||
+    cat.includes('디저트') || cat.includes('베이커리') || cat.includes('제과')
+}
+
 // menuMap: { [kakao_id]: [{price, ...}] } — DB에서 가져온 메뉴 데이터
 export function filterByPrice(restaurants, priceRange, menuMap = {}) {
   if (priceRange === '전체') return restaurants
+  const targetIdx = PRICE_ORDER.indexOf(priceRange)
   return restaurants.filter((r) => {
+    // ~8천원 필터: 카페 제외 + 실제 메인메뉴(첫번째) 가격 우선 사용
+    if (priceRange === '~8천원' && isCafeCat(r)) return false
+
     const kakaoId = r.kakao_id || r.id
     const dbMenus = menuMap[kakaoId]?.filter((m) => m.price)
     if (dbMenus?.length) {
-      return PRICE_ORDER.indexOf(priceToRange(dbMenus[0].price)) <= PRICE_ORDER.indexOf(priceRange)
+      return PRICE_ORDER.indexOf(priceToRange(dbMenus[0].price)) <= targetIdx
     }
     if (r.latest_price_krw) {
-      return PRICE_ORDER.indexOf(priceToRange(r.latest_price_krw)) <= PRICE_ORDER.indexOf(priceRange)
+      return PRICE_ORDER.indexOf(priceToRange(r.latest_price_krw)) <= targetIdx
     }
+    // ~8천원 필터이고 _isCheap 태그가 있으면 통과 (메뉴 데이터가 DB에 없어도 이미 검증된 것)
+    if (priceRange === '~8천원' && r._isCheap) return true
     // 카테고리 기반 추정 fallback
     const estimated = estimatePriceRange(r.category_name || r.category)
-    return PRICE_ORDER.indexOf(estimated) <= PRICE_ORDER.indexOf(priceRange)
+    return PRICE_ORDER.indexOf(estimated) <= targetIdx
   })
 }
