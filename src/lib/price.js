@@ -46,32 +46,33 @@ function priceToRange(price) {
   return '~25천원'
 }
 
-function isCafeCat(r) {
-  const cat = r.category_name || r.category || ''
-  return cat.includes('카페') || cat.includes('커피') || cat.includes('음료') ||
-    cat.includes('디저트') || cat.includes('베이커리') || cat.includes('제과')
-}
-
 // menuMap: { [kakao_id]: [{price, ...}] } — DB에서 가져온 메뉴 데이터
 export function filterByPrice(restaurants, priceRange, menuMap = {}) {
   if (priceRange === '전체') return restaurants
-  const targetIdx = PRICE_ORDER.indexOf(priceRange)
-  return restaurants.filter((r) => {
-    // ~8천원 필터: 카페 제외 + 실제 메인메뉴(첫번째) 가격 우선 사용
-    if (priceRange === '~8천원' && isCafeCat(r)) return false
+  const targetIndex = PRICE_ORDER.indexOf(priceRange)
 
+  return restaurants.filter((r) => {
     const kakaoId = r.kakao_id || r.id
     const dbMenus = menuMap[kakaoId]?.filter((m) => m.price)
+    
+    // 1. DB 메뉴 정보가 있는 경우 (첫 번째 메뉴 기준)
     if (dbMenus?.length) {
-      return PRICE_ORDER.indexOf(priceToRange(dbMenus[0].price)) <= targetIdx
+      const firstMenuPrice = dbMenus[0].price
+      return PRICE_ORDER.indexOf(priceToRange(firstMenuPrice)) <= targetIndex
     }
+    
+    // 2. 식당 테이블에 등록된 최신 가격 정보가 있는 경우
     if (r.latest_price_krw) {
-      return PRICE_ORDER.indexOf(priceToRange(r.latest_price_krw)) <= targetIdx
+      return PRICE_ORDER.indexOf(priceToRange(r.latest_price_krw)) <= targetIndex
     }
-    // ~8천원 필터이고 _isCheap 태그가 있으면 통과 (메뉴 데이터가 DB에 없어도 이미 검증된 것)
-    if (priceRange === '~8천원' && r._isCheap) return true
-    // 카테고리 기반 추정 fallback
+    
+    // 2.5 가성비 전용 데이터 (geojip_%) 예외 처리: 명시적 가격 정보가 없으면 ~8천원으로 간주
+    if (String(kakaoId).startsWith('geojip_')) {
+      return PRICE_ORDER.indexOf('~8천원') <= targetIndex
+    }
+    
+    // 3. 카테고리 기반 추정 (Fallback)
     const estimated = estimatePriceRange(r.category_name || r.category)
-    return PRICE_ORDER.indexOf(estimated) <= targetIdx
+    return PRICE_ORDER.indexOf(estimated) <= targetIndex
   })
 }

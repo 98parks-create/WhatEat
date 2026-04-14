@@ -5,7 +5,7 @@ import { isFavorite, toggleFavorite } from '../lib/favorites'
 import { estimatePriceRange } from '../lib/price'
 import { X, ThumbsUp, ThumbsDown, Star, Flame, Bookmark, Plus, Trash2, MessageSquare, Send } from 'lucide-react'
 
-export default function RestaurantDrawer({ restaurant: r, onClose, myLocation }) {
+export default function RestaurantDrawer({ restaurant: r, onClose }) {
   const [votes, setVotes] = useState({ up: r.votes_up || 0, down: r.votes_down || 0 })
   const [myVote, setMyVote] = useState(null)
   const [menus, setMenus] = useState(null)
@@ -17,16 +17,6 @@ export default function RestaurantDrawer({ restaurant: r, onClose, myLocation })
   const [comments, setComments] = useState([])
   const [newComment, setNewComment] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
-
-  useEffect(() => {
-    setMenus(null)
-    setShowAddMenu(false)
-    setComments([])
-    setNewComment('')
-    fetchMenus()
-    fetchComments()
-    setFav(isFavorite(r.kakao_id || r.id))
-  }, [r])
 
   async function fetchMenus() {
     const kakaoId = r.kakao_id || r.id
@@ -51,6 +41,20 @@ export default function RestaurantDrawer({ restaurant: r, onClose, myLocation })
       .limit(20)
     setComments(data || [])
   }
+
+  useEffect(() => {
+    const init = async () => {
+      setMenus(null)
+      setShowAddMenu(false)
+      setComments([])
+      setNewComment('')
+      await fetchMenus()
+      await fetchComments()
+      setFav(isFavorite(r.kakao_id || r.id))
+    }
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r])
 
   async function submitComment() {
     const text = newComment.trim()
@@ -140,7 +144,8 @@ export default function RestaurantDrawer({ restaurant: r, onClose, myLocation })
   }
 
   function timeAgo(d) {
-    const m = Math.floor((Date.now() - new Date(d)) / 60000)
+    const diff = (new Date() - new Date(d)) / 60000
+    const m = Math.floor(diff)
     if (m < 1) return '방금'
     if (m < 60) return `${m}분 전`
     if (m < 1440) return `${Math.floor(m / 60)}시간 전`
@@ -152,22 +157,24 @@ export default function RestaurantDrawer({ restaurant: r, onClose, myLocation })
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
   const detailHref = (() => {
     const kakaoId = r.kakao_id || r.id
-    const q = encodeURIComponent((r.place_name || r.name) + ' ' + (r.road_address_name || r.address_name || ''))
+    const name = r.place_name || r.name
+    const addr = r.road_address_name || r.address_name || r.address || ''
+    const q = encodeURIComponent(name + ' ' + addr.split(' ').slice(0, 3).join(' '))
     if (isMobile) {
       if (r.place_url) return r.place_url
       if (kakaoId && !String(kakaoId).startsWith('geojip_')) {
         return `https://place.map.kakao.com/${kakaoId}`
       }
     }
-    return `https://map.naver.com/p/search/${q}`
+    return `https://map.naver.com/v5/search/${q}`
   })()
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 px-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl w-full max-w-sm overflow-y-auto shadow-2xl" style={{ maxHeight: 'calc(85vh - env(safe-area-inset-bottom))' }}>
+      <div className="bg-white rounded-2xl w-full max-w-sm max-h-[85dvh] overflow-y-auto shadow-2xl">
 
         {/* 헤더 */}
         <div className="flex items-start justify-between px-5 pt-5 pb-2">

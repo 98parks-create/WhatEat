@@ -15,23 +15,28 @@ export default function AddRestaurantModal({ onClose }) {
   const fileInputRef = useRef(null)
   const previewUrlRef = useRef(null)
 
-  useEffect(() => {
-    return () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
-    }
-  }, [])
-
-  function searchPlaces() {
-    if (!keyword.trim() || !window.kakao) return
-    const ps = new window.kakao.maps.services.Places()
-    ps.keywordSearch(
-      keyword,
-      (data, status) => {
-        if (status === window.kakao.maps.services.Status.OK) setResults(data.slice(0, 6))
-        else setResults([])
-      },
-      { category_group_code: 'FD6' }
-    )
+  function processImage(file) {
+    return new Promise((resolve) => {
+      const img = new window.Image()
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        const MAX = 1200
+        let { width, height } = img
+        if (width > MAX || height > MAX) {
+          if (width > height) { height = Math.round(height * MAX / width); width = MAX }
+          else { width = Math.round(width * MAX / height); height = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (ctx) ctx.drawImage(img, 0, 0, width, height)
+        URL.revokeObjectURL(url)
+        canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.85)
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+      img.src = url
+    })
   }
 
   function handleImageChange(e) {
@@ -48,6 +53,96 @@ export default function AddRestaurantModal({ onClose }) {
     setImagePreview(url)
   }
 
+  function searchPlaces() {
+    if (!keyword.trim() || !window.kakao) return
+    const ps = new window.kakao.maps.services.Places()
+    ps.keywordSearch(
+      keyword,
+      (data, status) => {
+        if (status === window.kakao.maps.services.Status.OK) setResults(data.slice(0, 6))
+        else setResults([])
+      },
+ { category_group_code: 'FD6' }
+    )
+  }
+
+  async function save() {
+    if (!selected) return alert('식당을 선택해주세요')
+    if (saving) return
+    setSaving(true)
+
+    try {
+      let imageUrl = null
+      if (image) {
+        const blob = await processImage(image)
+        const path = `${selected.id}_${Date.now()}.jpg`
+        const { error: uploadError } = await supabase.storage
+          .from('restaurant-images')
+          .upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+
+        if (uploadError) {
+          console.error('Storage upload error:', uploadError)
+          // 사진 업로드 실패해도 식당 등록은 계속 진행하도록 alert만 표시
+          alert('사진 업로드 중 오류가 발생했습니다. (식당 정보만 등록됩니다)')
+        } else {
+          const { data: urlData } = supabase.storage
+            .from('restaurant-images')
+            .getPublicUrl(path)
+          if (urlData) imageUrl = urlData.publicUrl
+        }
+ }
+
+      const payload = {
+        kakao_id: selected.id,
+        name: selected.place_name,
+        address: selected.road_address_name || selected.address_name,
+        category: selected.category_name,
+        lat: selected.y,
+        lng: selected.x,
+        ...(selected.place_url && { place_url: selected.place_url }),
+        ...(imageUrl && { image_url: imageUrl }),
+      }
+
+      const { error: upsertError } = await supabase.from('restaurants').upsert(payload)
+      if (upsertError) {
+        if (upsertError.code === 'PGRST204') {
+          delete payload.image_url
+          await supabase.from('restaurants').upsert(payload)
+        } else {
+          throw upsertError
+        }
+      }
+
+      if (imageUrl) {
+        await supabase.from('restaurant_photos').insert({
+          kakao_id: selected.id,
+          url: imageUrl,
+          device_id: getDeviceId(),
+        })
+      }
+
+      const validMenus = menus.filter((m) => m.name.trim())
+      if (validMenus.length) {
+        await supabase.from('restaurant_menus').insert(
+          validMenus.map((m) => ({
+            kakao_id: selected.id,
+            menu_name: m.name,
+            price: m.price ? Number(m.price) : null,
+            calories: m.calories ? Number(m.calories) : null,
+          }))
+        )
+      }
+
+      setDone(true)
+      setTimeout(onClose, 1500)
+    } catch (err) {
+      console.error('Restaurant save error:', err)
+      alert('오류가 발생했습니다: ' + (err.message || '알 수 없는 오류'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function addMenuRow() {
     if (menus.length >= 5) return
     setMenus([...menus, { name: '', price: '', calories: '' }])
@@ -62,92 +157,18 @@ export default function AddRestaurantModal({ onClose }) {
     setMenus(menus.filter((_, i) => i !== idx))
   }
 
-  function processImage(file) {
-    return new Promise((resolve) => {
-      const img = new window.Image()
-      const url = URL.createObjectURL(file)
-      img.onload = () => {
-        const MAX = 1200
-        let { width, height } = img
-        if (width > MAX || height > MAX) {
-          if (width > height) { height = Math.round(height * MAX / width); width = MAX }
-          else { width = Math.round(width * MAX / height); height = MAX }
-        }
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height)
-        URL.revokeObjectURL(url)
-        canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.85)
-      }
-      img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
-      img.src = url
-    })
-  }
-
-  async function save() {
-    if (!selected) return
-    setSaving(true)
-
-    // 이미지 리사이즈 + JPEG 변환 후 업로드
-    let imageUrl = null
-    if (image) {
-      const blob = await processImage(image)
-      const path = `${selected.id}_${Date.now()}.jpg`
-      const { error } = await supabase.storage
-        .from('restaurant-images')
-        .upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
-      if (!error) {
-        const { data: urlData } = supabase.storage
-          .from('restaurant-images')
-          .getPublicUrl(path)
-        imageUrl = urlData.publicUrl
-      }
+  useEffect(() => {
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
     }
-
-    await supabase.from('restaurants').upsert({
-      kakao_id: selected.id,
-      name: selected.place_name,
-      address: selected.road_address_name || selected.address_name,
-      category: selected.category_name,
-      lat: selected.y,
-      lng: selected.x,
-      ...(selected.place_url && { place_url: selected.place_url }),
-      ...(imageUrl && { image_url: imageUrl }),
-    })
-
-    // 사진을 restaurant_photos에도 누적 저장
-    if (imageUrl) {
-      await supabase.from('restaurant_photos').insert({
-        kakao_id: selected.id,
-        url: imageUrl,
-        device_id: getDeviceId(),
-      })
-    }
-
-    const validMenus = menus.filter((m) => m.name.trim())
-    if (validMenus.length) {
-      await supabase.from('restaurant_menus').insert(
-        validMenus.map((m) => ({
-          kakao_id: selected.id,
-          menu_name: m.name,
-          price: m.price ? Number(m.price) : null,
-          calories: m.calories ? Number(m.calories) : null,
-        }))
-      )
-    }
-
-    setSaving(false)
-    setDone(true)
-    setTimeout(onClose, 1500)
-  }
+  }, [])
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4 pt-10 pb-20 sm:p-0"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white rounded-2xl w-full max-w-md overflow-y-auto shadow-2xl" style={{ maxHeight: 'calc(85vh - env(safe-area-inset-bottom))' }}>
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-full overflow-y-auto shadow-2xl relative flex flex-col">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
           <h3 className="font-bold text-gray-900 text-lg">식당 등록</h3>

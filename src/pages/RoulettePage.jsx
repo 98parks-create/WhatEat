@@ -15,9 +15,8 @@ function getKeyword(category, persons, isDinner) {
   return '음식점'
 }
 
-function getRadius(persons, isDinner) {
-  if (isDinner) return 2000
-  return PERSON_COUNTS.indexOf(persons) >= 2 ? 1500 : 1000
+function getRadius() {
+  return 500 // 사용자 요청: 500m 고정 (도보 10분 내외)
 }
 
 export default function RoulettePage() {
@@ -112,10 +111,6 @@ export default function RoulettePage() {
           lat: pos.lat, lng: pos.lng, radius, keyword, dinnerMode: isDinner,
         })
 
-        if (!isDinner && lunchOnly) {
-          // 이미 kakao.js에서 lunch filter 처리됨
-        }
-
         if (!isDinner && priceRange !== '전체') {
           const kakaoIds = results.map((r) => r.id)
           const { data: menuData } = await supabase
@@ -175,7 +170,8 @@ export default function RoulettePage() {
     return new Promise((resolve, reject) =>
       navigator.geolocation.getCurrentPosition(
         (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        reject
+        reject,
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       )
     )
   }
@@ -227,6 +223,22 @@ export default function RoulettePage() {
   ].filter(Boolean).join(' · ')
 
   const estimatedPrice = result ? estimatePriceRange(result.category_name) : ''
+
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+  const detailHref = (() => {
+    if (!result) return '#'
+    const kakaoId = result.id || result.kakao_id
+    const name = result.place_name || result.name
+    const addr = result.road_address_name || result.address_name || result.address || ''
+    const q = encodeURIComponent(name + ' ' + addr.split(' ').slice(0, 3).join(' '))
+    if (isMobile) {
+      if (result.place_url) return result.place_url
+      if (kakaoId && !String(kakaoId).startsWith('geojip_')) {
+        return `https://place.map.kakao.com/${kakaoId}`
+      }
+    }
+    return `https://map.naver.com/v5/search/${q}`
+  })()
 
   return (
     <div className="p-4 max-w-md mx-auto pb-24">
@@ -350,10 +362,12 @@ export default function RoulettePage() {
             ))}
           </div>
           <p className="text-xs font-semibold text-gray-500 mb-2">가격대</p>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
             {PRICE_RANGES.map((p) => (
               <button key={p} onClick={() => setPriceRange(p)}
-                className={`px-3 py-1.5 rounded-full text-sm border transition-colors ${priceRange === p ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-600 border-gray-200'}`}>
+                className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm ${
+                  priceRange === p ? 'bg-green-600 text-white' : 'bg-white text-gray-500 border border-gray-200'
+                }`}>
                 {p}
               </button>
             ))}
@@ -448,7 +462,7 @@ export default function RoulettePage() {
 
             {!spinning && (
               <div className="flex gap-2">
-                <a href={`https://search.naver.com/search.naver?query=${encodeURIComponent(result.place_name + ' ' + (result.road_address_name || result.address_name || ''))}`}
+                <a href={detailHref}
                   target="_blank" rel="noopener noreferrer"
                   className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-gray-100 text-gray-700 text-center hover:bg-gray-200 transition-colors">
                   🗺️ 식당 정보 보기

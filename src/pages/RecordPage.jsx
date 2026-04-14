@@ -49,11 +49,6 @@ export default function RecordPage() {
   const weekDates = getThisWeekDates()
   const todayStr = new Date().toISOString().split('T')[0]
 
-  useEffect(() => {
-    fetchRecords()
-    setFavorites(getFavorites())
-  }, [])
-
   async function fetchRecords() {
     const { data } = await supabase
       .from('meal_records').select('*')
@@ -62,6 +57,14 @@ export default function RecordPage() {
     setRecords(data || [])
     setLoading(false)
   }
+
+  useEffect(() => {
+    const init = async () => {
+      await fetchRecords()
+      setFavorites(getFavorites())
+    }
+    init()
+  }, [])
 
   async function deleteRecord(id) {
     await supabase.from('meal_records').delete().eq('id', id)

@@ -4,8 +4,10 @@ import { getDeviceId } from '../lib/deviceId'
 import { MessageSquare, Star, MapPin, PenLine, Heart, Utensils, LocateFixed, Loader, Send, ThumbsUp, ThumbsDown, Plus } from 'lucide-react'
 import RestaurantDetailModal from '../components/RestaurantDetailModal'
 import AddRestaurantModal from '../components/AddRestaurantModal'
+import { filterByPrice } from '../lib/price'
 
 const CATEGORIES = ['전체', '한식', '중식', '일식', '양식', '분식']
+const PRICE_RANGES = ['전체', '~8천원', '~10천원', '~15천원', '~25천원']
 const SORTS = [
   { key: 'votes', label: '추천순' },
   { key: 'latest', label: '최신순' },
@@ -52,7 +54,6 @@ const CITIES = {
   '경남': ['전체', '창원', '진주', '통영', '사천', '김해', '밀양', '거제', '양산', '의령', '함안', '창녕', '고성', '남해', '하동', '산청', '함양', '거창', '합천'],
   '제주': ['전체', '제주시', '서귀포시'],
 }
-
 function getDistanceKm(lat1, lng1, lat2, lng2) {
   const R = 6371
   const dLat = ((lat2 - lat1) * Math.PI) / 180
@@ -60,6 +61,14 @@ function getDistanceKm(lat1, lng1, lat2, lng2) {
   const a = Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+function timeAgo(d) {
+  const m = Math.floor((Date.now() - new Date(d)) / 60000)
+  if (m < 1) return '방금'
+  if (m < 60) return `${m}분 전`
+  if (m < 1440) return `${Math.floor(m / 60)}시간 전`
+  return `${Math.floor(m / 1440)}일 전`
 }
 
 const CAT_COLORS = {
@@ -76,19 +85,14 @@ function getCatColor(cat) {
   return CAT_COLORS[key] || 'bg-gray-100 text-gray-500'
 }
 
-function timeAgo(d) {
-  const m = Math.floor((Date.now() - new Date(d)) / 60000)
-  if (m < 1) return '방금'
-  if (m < 60) return `${m}분 전`
-  if (m < 1440) return `${Math.floor(m / 60)}시간 전`
-  return `${Math.floor(m / 1440)}일 전`
-}
+
 
 // ─── 맛집 공유 컬럼 ──────────────────────────────────────────────────────
 function RestaurantColumn() {
   const [restaurants, setRestaurants] = useState([])
   const [reviews, setReviews] = useState({})
   const [category, setCategory] = useState('전체')
+  const [priceRange, setPriceRange] = useState('전체')
   const [sort, setSort] = useState('votes')
   const [loading, setLoading] = useState(true)
   const [myVotes, setMyVotes] = useState({})
@@ -99,11 +103,6 @@ function RestaurantColumn() {
   const [selectedCity, setSelectedCity] = useState('전체')
   const [detailRestaurant, setDetailRestaurant] = useState(null)
   const [showAddModal, setShowAddModal] = useState(false)
-  const [expandedReviewId, setExpandedReviewId] = useState(null)
-  const [reviewInputs, setReviewInputs] = useState({})
-  const [submittingReview, setSubmittingReview] = useState(null)
-
-  useEffect(() => { fetchRestaurants() }, [category, sort, selectedProvince, selectedCity, radius, myLocation])
 
   async function fetchRestaurants() {
     setLoading(true)
@@ -111,7 +110,6 @@ function RestaurantColumn() {
       let query = supabase.from('restaurants').select('*').not('kakao_id', 'like', 'geojip_%')
       if (category !== '전체') query = query.ilike('category', `%${category}%`)
 
-      // 지역 필터
       if (selectedProvince === '내 주변') {
         // 위치 기반 필터는 클라이언트에서 처리
       } else if (selectedProvince !== '전체') {
@@ -130,31 +128,42 @@ function RestaurantColumn() {
       if (error) throw error
       let list = data || []
 
-      // 내 주변 모드: 클라이언트 거리 필터
       if (selectedProvince === '내 주변' && myLocation) {
         list = list.filter((r) => {
           if (!r.lat || !r.lng) return false
-          return getDistanceKm(myLocation.lat, myLocation.lng, Number(r.lat), Number(r.lng)) <= radius
+          const d = getDistanceKm(myLocation.lat, myLocation.lng, Number(r.lat), Number(r.lng))
+          return d <= radius
         })
       }
 
-      setRestaurants(list)
       if (list.length) {
         const { data: rv } = await supabase.from('reviews').select('*')
           .in('kakao_id', list.map((r) => r.kakao_id))
           .order('created_at', { ascending: false })
         const grouped = {}
-        rv?.forEach((r) => { if (!grouped[r.kakao_id]) grouped[r.kakao_id] = []; grouped[r.kakao_id].push(r) })
+        rv?.forEach((rvw) => { if (!grouped[rvw.kakao_id]) grouped[rvw.kakao_id] = []; grouped[rvw.kakao_id].push(rvw) })
         setReviews(grouped)
+        list = filterByPrice(list, priceRange, grouped)
       } else {
         setReviews({})
       }
+
+      setRestaurants(list)
     } catch (e) {
-      console.error('맛집 목록 불러오기 실패:', e)
+      console.error('맛집 목록 실패:', e)
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    const init = async () => {
+      await fetchRestaurants()
+    }
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, priceRange, sort, selectedProvince, selectedCity, radius, myLocation])
+
 
   async function getMyLocation() {
     setLocating(true)
@@ -163,7 +172,12 @@ function RestaurantColumn() {
         setMyLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude })
         setLocating(false)
       },
-      () => { alert('위치 권한을 허용해주세요'); setLocating(false) }
+      (err) => {
+        console.warn('Location error:', err)
+        alert('위치를 가져올 수 없습니다. 권한을 확인해 주세요.')
+        setLocating(false)
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
   }
 
@@ -172,25 +186,6 @@ function RestaurantColumn() {
     setSelectedCity('전체')
     if (p === '내 주변' && !myLocation) getMyLocation()
   }
-
-  async function submitQuickReview(kakaoId, restaurantName) {
-    const text = reviewInputs[kakaoId]?.trim()
-    if (!text) return
-    setSubmittingReview(kakaoId)
-    const { data } = await supabase.from('reviews').insert({
-      kakao_id: kakaoId,
-      restaurant_name: restaurantName,
-      content: text,
-      device_id: getDeviceId(),
-    }).select().single()
-    if (data) {
-      setReviews((prev) => ({ ...prev, [kakaoId]: [data, ...(prev[kakaoId] || [])] }))
-      setReviewInputs((prev) => ({ ...prev, [kakaoId]: '' }))
-      setExpandedReviewId(null)
-    }
-    setSubmittingReview(null)
-  }
-
   async function voteRestaurant(r, type) {
     if (myVotes[r.kakao_id]) return
     setMyVotes((p) => ({ ...p, [r.kakao_id]: type }))
@@ -258,22 +253,37 @@ function RestaurantColumn() {
             ))}
           </div>
         )}
-
-        {/* 카테고리 + 정렬 */}
-        <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+        {/* 카테고리 선택 */}
+        <div className="flex gap-1 overflow-x-auto scrollbar-hide mb-1.5">
           {CATEGORIES.map((c) => (
             <button key={c} onClick={() => setCategory(c)}
-              className={`shrink-0 px-2 py-1 rounded-full text-xs font-medium transition-colors ${
+              className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors shadow-sm ${
                 category === c ? 'bg-white text-orange-600 font-bold' : 'bg-white/20 text-white'
               }`}>
               {c}
             </button>
           ))}
-          <div className="ml-auto flex shrink-0 bg-white/20 rounded-lg overflow-hidden">
+        </div>
+
+        {/* 가격 필터 (사용자 요청: 초록색 버튼) */}
+        <div className="flex gap-1 overflow-x-auto scrollbar-hide mb-1.5">
+          {PRICE_RANGES.map((p) => (
+            <button key={p} onClick={() => setPriceRange(p)}
+              className={`shrink-0 px-2.5 py-1 rounded-full text-[10px] font-medium transition-colors shadow-sm ${
+                priceRange === p ? 'bg-green-600 text-white font-bold' : 'bg-white/20 text-white'
+              }`}>
+              {p}
+            </button>
+          ))}
+        </div>
+
+        {/* 정렬 필터 */}
+        <div className="flex items-center justify-end">
+          <div className="flex shrink-0 bg-white/20 rounded-lg overflow-hidden border border-white/10">
             {SORTS.map((s) => (
               <button key={s.key} onClick={() => setSort(s.key)}
-                className={`px-2 py-1 text-xs font-semibold transition-colors ${
-                  sort === s.key ? 'bg-white text-orange-600' : 'text-white'
+                className={`px-3 py-1 text-[10px] font-semibold transition-colors ${
+                  sort === s.key ? 'bg-white text-orange-600' : 'text-white hover:bg-white/10'
                 }`}>
                 {s.label}
               </button>
@@ -307,6 +317,7 @@ function RestaurantColumn() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
         {restaurants.map((r) => {
           const rviews = reviews[r.kakao_id] || []
+
           const myVote = myVotes[r.kakao_id]
           const catLabel = r.category?.split(' > ').slice(-1)[0] || '기타'
           const totalVotes = (r.votes_up || 0) + (r.votes_down || 0)
@@ -378,44 +389,12 @@ function RestaurantColumn() {
                     } disabled:cursor-default`}>
                     👎 {r.votes_down || 0}
                   </button>
-                  <button
-                    onClick={() => setExpandedReviewId(expandedReviewId === r.kakao_id ? null : r.kakao_id)}
-                    className={`ml-auto flex items-center gap-1 text-xs transition-colors ${expandedReviewId === r.kakao_id ? 'text-orange-500' : 'text-gray-500 hover:text-orange-500'}`}>
+                  <button onClick={() => setDetailRestaurant(r)}
+                    className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-orange-500">
                     <MessageSquare size={13} />
                     {rviews.length > 0 && <span className="bg-orange-500 text-white text-xs w-4 h-4 rounded-full flex items-center justify-center font-bold">{rviews.length}</span>}
                   </button>
                 </div>
-
-                {expandedReviewId === r.kakao_id && (
-                  <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                    {rviews.length > 0 && (
-                      <div className="mb-2 space-y-1 max-h-28 overflow-y-auto">
-                        {rviews.map((rv) => (
-                          <div key={rv.id} className="bg-gray-50 rounded-lg px-2.5 py-1.5">
-                            <p className="text-xs text-gray-700 leading-relaxed">{rv.content}</p>
-                            <p className="text-xs text-gray-400 mt-0.5">{timeAgo(rv.created_at)}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex gap-1.5">
-                      <input
-                        value={reviewInputs[r.kakao_id] || ''}
-                        onChange={(e) => setReviewInputs((prev) => ({ ...prev, [r.kakao_id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && submitQuickReview(r.kakao_id, r.name)}
-                        placeholder="한 줄 리뷰를 남겨보세요"
-                        maxLength={80}
-                        className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2 text-xs outline-none focus:border-orange-400"
-                      />
-                      <button
-                        onClick={() => submitQuickReview(r.kakao_id, r.name)}
-                        disabled={submittingReview === r.kakao_id || !reviewInputs[r.kakao_id]?.trim()}
-                        className="bg-orange-500 text-white px-3 rounded-lg disabled:opacity-40">
-                        <Send size={12} />
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
             </div>
@@ -458,8 +437,6 @@ function FreeBoardColumn() {
   const [submittingComment, setSubmittingComment] = useState(null)
   const [myLikes, setMyLikes] = useState({})
 
-  useEffect(() => { fetchPosts() }, [])
-
   async function fetchPosts() {
     setLoading(true)
     const { data } = await supabase.from('free_posts').select('*')
@@ -467,6 +444,13 @@ function FreeBoardColumn() {
     setPosts(data || [])
     setLoading(false)
   }
+
+  useEffect(() => {
+    const init = async () => {
+      await fetchPosts()
+    }
+    init()
+  }, [])
 
   async function submitPost() {
     if (!title.trim() || !content.trim()) return
