@@ -32,7 +32,19 @@ export default function AddRestaurantModal({ onClose }) {
         const ctx = canvas.getContext('2d')
         if (ctx) ctx.drawImage(img, 0, 0, width, height)
         URL.revokeObjectURL(url)
-        canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.85)
+        
+        if (canvas.toBlob) {
+          canvas.toBlob((blob) => resolve(blob || file), 'image/jpeg', 0.85)
+        } else {
+          // toBlob 미지원 브라우저(일부 모바일) 대응
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+          const byteString = atob(dataUrl.split(',')[1])
+          const mimeString = dataUrl.split(',')[0].split(':')[1].split(';')[0]
+          const ab = new ArrayBuffer(byteString.length)
+          const ia = new Uint8Array(ab)
+          for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
+          resolve(new Blob([ab], { type: mimeString }))
+        }
       }
       img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
       img.src = url
@@ -103,13 +115,21 @@ export default function AddRestaurantModal({ onClose }) {
         ...(imageUrl && { image_url: imageUrl }),
       }
 
-      const { error: upsertError } = await supabase.from('restaurants').upsert(payload)
-      if (upsertError) {
-        if (upsertError.code === 'PGRST204') {
-          delete payload.image_url
-          await supabase.from('restaurants').upsert(payload)
-        } else {
-          throw upsertError
+      // 1. 식당 중복 확인 및 등록
+      const { data: existing } = await supabase
+        .from('restaurants')
+        .select('id')
+        .eq('kakao_id', selected.id)
+        .maybeSingle()
+
+      if (!existing) {
+        // 존재하지 않을 때만 등록
+        const { error: insError } = await supabase
+          .from('restaurants')
+          .insert(payload)
+        
+        if (insError && insError.code !== '23505') { // 23505: 중복 키 에러 (타이밍 이슈 대비)
+          throw insError
         }
       }
 

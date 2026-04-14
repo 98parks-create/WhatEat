@@ -531,12 +531,16 @@ export default function MapPage() {
       )}
 
       <button onClick={goToMyLocation}
-        className="absolute bottom-[calc(90px+env(safe-area-inset-bottom))] right-4 z-[40] bg-white rounded-full p-3 shadow-lg border border-gray-100">
+        className={`absolute right-4 z-[40] bg-white rounded-full p-3 shadow-lg border border-gray-100 transition-all ${
+          isStandalone ? 'bottom-[calc(130px+env(safe-area-inset-bottom))]' : 'bottom-[calc(90px+env(safe-area-inset-bottom))]'
+        }`}>
         <LocateFixed size={20} className="text-orange-500" />
       </button>
 
       <button onClick={() => setShowAddModal(true)}
-        className="absolute bottom-[calc(90px+env(safe-area-inset-bottom))] left-4 z-[40] bg-orange-500 text-white rounded-full px-4 py-2.5 shadow-lg flex items-center gap-1.5 text-sm font-medium">
+        className={`absolute left-4 z-[40] bg-orange-500 text-white rounded-full px-4 py-2.5 shadow-lg flex items-center gap-1.5 text-sm font-medium transition-all ${
+          isStandalone ? 'bottom-[calc(130px+env(safe-area-inset-bottom))]' : 'bottom-[calc(90px+env(safe-area-inset-bottom))]'
+        }`}>
         <Plus size={16} />
         식당 등록
       </button>
