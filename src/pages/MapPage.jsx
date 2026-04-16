@@ -406,7 +406,7 @@ export default function MapPage() {
           ))}
         </div>
         {/* 특수 필터 */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
           <button
             onClick={() => { const n = !lunchOnly; setLunchOnly(n); lunchOnlyRef.current = n; reloadMap() }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm border ${
