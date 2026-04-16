@@ -16,7 +16,8 @@ function getCatColor(cat) {
   return CAT_COLORS[key] || 'bg-gray-100 text-gray-500'
 }
 function timeAgo(d) {
-  const m = Math.floor((Date.now() - new Date(d)) / 60000)
+  const now = Date.now()
+  const m = Math.floor((now - new Date(d)) / 60000)
   if (m < 1) return '방금'
   if (m < 60) return `${m}분 전`
   if (m < 1440) return `${Math.floor(m / 60)}시간 전`
@@ -61,12 +62,6 @@ export default function RestaurantDetailModal({ restaurant: r, onClose, onVote }
   const catLabel = r.category?.split(' > ').slice(-1)[0] || '기타'
   const totalVotes = votes.up + votes.down
   const upPct = totalVotes ? Math.round((votes.up / totalVotes) * 100) : 0
-
-  useEffect(() => {
-    fetchReviews()
-    fetchPhotos()
-  }, [])
-
   const kakaoId = r.kakao_id || r.id
 
   async function fetchPhotos() {
@@ -94,6 +89,15 @@ export default function RestaurantDetailModal({ restaurant: r, onClose, onVote }
     setReviews(data || [])
     setLoadingReviews(false)
   }
+
+  useEffect(() => {
+    const init = async () => {
+      await fetchReviews()
+      await fetchPhotos()
+    }
+    init()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kakaoId])
 
   async function handlePhotoUpload(e) {
     const file = e.target.files?.[0]
@@ -144,10 +148,10 @@ export default function RestaurantDetailModal({ restaurant: r, onClose, onVote }
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60"
+      className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[82vh]">
+      <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85dvh] sm:max-h-[82vh]">
 
         {/* 사진 갤러리 */}
         <div className="relative w-full shrink-0 bg-black rounded-t-2xl sm:rounded-t-2xl overflow-hidden" style={{ maxHeight: 'min(60vw, 220px)', minHeight: '160px' }}>

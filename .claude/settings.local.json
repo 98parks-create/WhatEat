@@ -42,7 +42,9 @@
       "Bash(curl -s 'https://tycwcqbypctbfkpfsbns.supabase.co/rest/v1/reviews?limit=3' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5Y3djcWJ5cGN0YmZrcGZzYm5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4NDc4NjIsImV4cCI6MjA5MTQyMzg2Mn0.9oXP8bLAAheQ4W7JlDJP1EtUj7fYpNjQctSqAFLUVKA' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR5Y3djcWJ5cGN0YmZrcGZzYm5zIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU4NDc4NjIsImV4cCI6MjA5MTQyMzg2Mn0.9oXP8bLAAheQ4W7JlDJP1EtUj7fYpNjQctSqAFLUVKA')",
       "Bash(curl -s 'https://onnrngvmkpagzfutrqvo.supabase.co/rest/v1/restaurants?select=kakao_id,name,image_url&image_url=not.is.null&limit=5' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ubnJuZ3Zta3BhZ3pmdXRycXZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU0MDcyMjYsImV4cCI6MjA2MDk4MzIyNn0.WlwaMX9QnRnDqFm3OfVKcRXLJ8GjDo_NkV1hGjJptY4' -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9ubnJuZ3Zta3BhZ3pmdXRycXZvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU0MDcyMjYsImV4cCI6MjA2MDk4MzIyNn0.WlwaMX9QnRnDqFm3OfVKcRXLJ8GjDo_NkV1hGjJptY4')",
       "Bash(npx vite:*)",
-      "Bash(vercel --version)"
+      "Bash(vercel --version)",
+      "Bash(powershell -Command ':*)",
+      "Bash(powershell -Command \"Set-Location 'C:\\\\Users\\\\98par\\\\Desktop\\\\WhatEat-main'; npm run build 2>&1\")"
     ]
   }
 }

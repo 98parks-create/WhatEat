@@ -4,7 +4,8 @@ import { getDeviceId } from '../lib/deviceId'
 import { X, PenLine, Heart, MessageSquare, Send, ChevronDown, ChevronUp } from 'lucide-react'
 
 function timeAgo(d) {
-  const m = Math.floor((Date.now() - new Date(d)) / 60000)
+  const diff = (new Date() - new Date(d)) / 60000
+  const m = Math.floor(diff)
   if (m < 1) return '방금'
   if (m < 60) return `${m}분 전`
   if (m < 1440) return `${Math.floor(m / 60)}시간 전`
@@ -24,8 +25,6 @@ export default function FreeBoardModal({ onClose }) {
   const [submittingComment, setSubmittingComment] = useState(null)
   const [myLikes, setMyLikes] = useState({})
 
-  useEffect(() => { fetchPosts() }, [])
-
   async function fetchPosts() {
     setLoading(true)
     const { data } = await supabase.from('free_posts').select('*')
@@ -33,6 +32,13 @@ export default function FreeBoardModal({ onClose }) {
     setPosts(data || [])
     setLoading(false)
   }
+
+  useEffect(() => {
+    const init = async () => {
+      await fetchPosts()
+    }
+    init()
+  }, [])
 
   async function submitPost() {
     if (!title.trim() || !content.trim()) return
@@ -83,7 +89,7 @@ export default function FreeBoardModal({ onClose }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 px-0 sm:px-4"
       onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col" style={{ maxHeight: 'calc(85vh - env(safe-area-inset-bottom))' }}>
+      <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
         {/* 헤더 */}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-100 shrink-0">
           <div className="flex items-center gap-2">

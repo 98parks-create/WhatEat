@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { loadKakaoMapScript, searchNearbyRestaurants } from '../lib/kakao'
 import { filterByPrice } from '../lib/price'
 import { supabase } from '../lib/supabase'
@@ -9,17 +9,12 @@ import AddRestaurantModal from '../components/AddRestaurantModal'
 const CATEGORIES = ['전체', '한식', '중식', '일식', '양식', '분식', '카페']
 const PRICE_RANGES = ['전체', '~8천원', '~10천원', '~15천원', '~25천원']
 
-function isCafe(r) {
-  const cat = r.category_name || r.category || ''
-  return cat.includes('카페') || cat.includes('커피') || cat.includes('음료') ||
-    cat.includes('디저트') || cat.includes('베이커리') || cat.includes('제과') || cat.includes('카페/')
-}
-
 export default function MapPage() {
   const mapRef = useRef(null)
   const kakaoMap = useRef(null)
   const overlaysRef = useRef([])
   const myMarkerRef = useRef(null)
+  const DIET_KEYWORDS = ['샐러드', '포케', '샌드위치', '그릭요거트', '서브웨이', '다이어트', '건강식', '키토']
   const [selected, setSelected] = useState(null)
   const [category, setCategory] = useState('전체')
   const categoryRef = useRef('전체')
@@ -34,6 +29,8 @@ export default function MapPage() {
   const lunchOnlyRef = useRef(true)
   const [geojipOnly, setGeojipOnly] = useState(false)
   const geojipOnlyRef = useRef(false)
+  const [dietOnly, setDietOnly] = useState(false)
+  const dietOnlyRef = useRef(false)
   const selectedRef = useRef(null)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [installed, setInstalled] = useState(false)
@@ -47,18 +44,11 @@ export default function MapPage() {
   const isStandalone = window.matchMedia('(display-mode: standalone)').matches
     || window.navigator.standalone === true
   const showInstallBtn = !isStandalone && !installed && (installPrompt || isIos)
-
-  useEffect(() => {
-    initMap()
-    const handler = (e) => { e.preventDefault(); setInstallPrompt(e) }
-    window.addEventListener('beforeinstallprompt', handler)
-    window.addEventListener('appinstalled', () => setInstalled(true))
-    return () => window.removeEventListener('beforeinstallprompt', handler)
-  }, [])
-
   async function initMap() {
     try {
-      await loadKakaoMapScript()
+      if (!window.kakao) {
+        await loadKakaoMapScript()
+      }
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const lat = pos.coords.latitude
@@ -66,7 +56,17 @@ export default function MapPage() {
           setMyLocation({ lat, lng })
           setupMap(lat, lng)
         },
-        () => setupMap(37.5665, 126.9780)
+        (err) => {
+          console.error('Geolocation failed:', err)
+          let errMsg = '현재 위치를 가져올 수 없습니다. '
+          if (err.code === 1) errMsg += '위치 권한을 허용해주세요.'
+          else if (err.code === 3) errMsg += '요청 시간이 초과되었습니다.'
+          
+          alert(errMsg + ' 기본 위치(서울)로 표시합니다.')
+          setMyLocation({ lat: 37.5665, lng: 126.9780 })
+          setupMap(37.5665, 126.9780)
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       )
     } catch (e) {
       console.error(e)
@@ -77,6 +77,7 @@ export default function MapPage() {
 
   function setupMap(lat, lng) {
     const { kakao } = window
+    if (!mapRef.current) return
     kakaoMap.current = new kakao.maps.Map(mapRef.current, {
       center: new kakao.maps.LatLng(lat, lng),
       level: 4,
@@ -104,6 +105,105 @@ export default function MapPage() {
     setLoading(false)
   }
 
+  async function fetchRestaurants(lat, lng) {
+    setSearching(true)
+    try {
+      // 1. 기본 데이터(가성비DB, 일반등록DB) 동시 조회
+      const [geojipList, registeredList] = await Promise.all([
+        fetchGeojipNearby(),
+        fetchRegisteredNearby(),
+      ])
+
+      let kakaoResults = []
+      if (!geojipOnlyRef.current) {
+        let keyword = categoryRef.current === '전체' ? '음식점' : categoryRef.current
+        if (dietOnlyRef.current && categoryRef.current === '전체') keyword = '샐러드'
+        
+        kakaoResults = await searchNearbyRestaurants({
+          lat, lng, radius: 1500, keyword, dinnerMode: !lunchOnlyRef.current,
+          mapInstance: kakaoMap.current,
+        })
+        if (categoryRef.current !== '전체') {
+          kakaoResults = kakaoResults.filter((r) => (r.category_name || '').includes(categoryRef.current))
+        }
+      }
+
+      // 2. 모든 후보군의 ID 수집 (메뉴 및 상세정보 조회용)
+      const kakaoIds = kakaoResults.map(r => r.id)
+      const registeredIds = registeredList.map(r => r.kakao_id)
+      const geojipIds = geojipList.map(r => r.kakao_id)
+      const allIds = [...new Set([...kakaoIds, ...registeredIds, ...geojipIds])]
+
+      // 3. DB 상세 정보 및 메뉴 정보 통합 조회
+      const [{ data: dbData }, { data: mnData }] = await Promise.all([
+        kakaoIds.length ? supabase.from('restaurants').select('*').in('kakao_id', kakaoIds) : Promise.resolve({ data: [] }),
+        allIds.length ? supabase.from('restaurant_menus').select('*').in('kakao_id', allIds).order('created_at', { ascending: true }) : Promise.resolve({ data: [] }),
+      ])
+
+      // 4. 메뉴 맵 생성 (첫 번째 메뉴가 대표 메뉴)
+      const menuMap = {}
+      mnData?.forEach((m) => {
+        if (!menuMap[m.kakao_id]) menuMap[m.kakao_id] = []
+        menuMap[m.kakao_id].push(m)
+      })
+
+      // 5. 각 데이터 소스별 정보 병합 및 가성비 판단
+      const processItem = (r, isKakao = false) => {
+        const id = isKakao ? r.id : r.kakao_id
+        const extra = isKakao ? dbData?.find(d => d.kakao_id === id) : r
+        const mns = menuMap[id]?.filter(m => m.price) || []
+        
+        // 가성비 판단 (첫 번째 메뉴 8000원 이하 혹은 최신 등록 가격 8000원 이하)
+        const hasCheapMenu = mns.length > 0 && mns[0].price <= 8000
+        const hasCheapPrice = extra?.latest_price_krw && extra.latest_price_krw <= 8000
+        const isCheapSource = String(id).startsWith('geojip_')
+        const isCheap = hasCheapMenu || hasCheapPrice || isCheapSource
+        
+        return {
+          ...r,
+          ...extra,
+          kakao_id: id,
+          place_name: isKakao ? r.place_name : r.name,
+          category_name: isKakao ? r.category_name : r.category,
+          y: isKakao ? r.y : r.lat,
+          x: isKakao ? r.x : r.lng,
+          _menus: menuMap[id] || [],
+          _isCheap: isCheap,
+          _cheapPrice: mns.length > 0 ? mns[0].price : (extra?.latest_price_krw || null)
+        }
+      }
+
+      const kakaoMerged = kakaoResults.map(r => processItem(r, true))
+      const registeredMerged = registeredList
+        .filter(r => !kakaoIds.includes(r.kakao_id))
+        .map(r => processItem(r))
+      const geojipMerged = geojipList.map(r => processItem(r))
+
+      // 6. 전체 목록 통합 및 가격 필터링 적용
+      let allMerged = [...kakaoMerged, ...registeredMerged, ...geojipMerged]
+      
+      // 가성비만 모드일 경우 필터링
+      if (geojipOnlyRef.current) {
+        allMerged = allMerged.filter(r => r._isCheap)
+      }
+
+      // 다이어터 모드일 경우 필터링
+      if (dietOnlyRef.current) {
+        allMerged = allMerged.filter(r => 
+          DIET_KEYWORDS.some(kw => (r.category_name || '').includes(kw) || (r.place_name || '').includes(kw))
+        )
+      }
+
+      // 최종 가격대 필터링
+      const filtered = filterByPrice(allMerged, priceRangeRef.current, menuMap)
+      updateOverlays(filtered)
+      fetchTop10InArea()
+    } catch (e) {
+      console.error(e)
+    }
+    setSearching(false)
+  }
+
   async function fetchGeojipNearby() {
     if (!kakaoMap.current) return []
     const bounds = kakaoMap.current.getBounds()
@@ -123,7 +223,6 @@ export default function MapPage() {
       query = query.ilike('category', `%${categoryRef.current}%`)
     }
 
-    // 바운딩박스 내 전체 가져온 뒤 중심에서 가까운 순 50개
     const { data } = await query.limit(200)
     const center = kakaoMap.current.getCenter()
     const clat = center.getLat()
@@ -199,104 +298,6 @@ export default function MapPage() {
     setShowTop10(top.length > 0)
   }
 
-  async function fetchRestaurants(lat, lng) {
-    setSearching(true)
-    try {
-      const [geojipList, registeredList] = await Promise.all([
-        fetchGeojipNearby(),
-        fetchRegisteredNearby(),
-      ])
-
-      let merged
-
-      if (geojipOnlyRef.current) {
-        // 가성비만: geojip + 직접 등록 식당 중 메인 메뉴 8천원 이하
-        const registeredIds = registeredList.map((r) => r.kakao_id)
-        const { data: menuData } = registeredIds.length
-          ? await supabase.from('restaurant_menus').select('*').in('kakao_id', registeredIds)
-          : { data: [] }
-
-        const menuMap = {}
-        menuData?.forEach((m) => {
-          if (!menuMap[m.kakao_id]) menuMap[m.kakao_id] = []
-          menuMap[m.kakao_id].push(m)
-        })
-
-        const cheapRegistered = registeredList.filter((r) => {
-          if (isCafe(r)) return false
-          const menus = menuMap[r.kakao_id]?.filter((m) => m.price)
-          return menus?.length && menus[0].price <= 8000
-        }).map((r) => {
-          const menus = menuMap[r.kakao_id]?.filter((m) => m.price) || []
-          return { ...r, _menus: menuMap[r.kakao_id] || [], _isCheap: true, _cheapPrice: menus[0]?.price }
-        })
-
-        const geojipFiltered = filterByPrice(geojipList, priceRangeRef.current, {})
-        merged = [...geojipFiltered, ...cheapRegistered]
-      } else {
-        const keyword = categoryRef.current === '전체' ? '음식점' : categoryRef.current
-        const results = await searchNearbyRestaurants({
-          lat, lng, keyword, dinnerMode: !lunchOnlyRef.current,
-          mapInstance: kakaoMap.current,
-        })
-
-        // 카테고리 선택 시 클라이언트 사이드도 추가 필터링
-        const categoryFiltered = categoryRef.current === '전체'
-          ? results
-          : results.filter((r) => (r.category_name || '').includes(categoryRef.current))
-
-        const kakaoIdsSet = new Set(categoryFiltered.map((r) => r.id))
-        const placeIds = [...kakaoIdsSet]
-
-        // DB에는 있지만 Kakao API 결과에 없는 등록 식당 (반경 밖, 지방 등)
-        const uniqueRegistered = registeredList.filter((r) => !kakaoIdsSet.has(r.kakao_id))
-        const uniqueRegisteredIds = uniqueRegistered.map((r) => r.kakao_id)
-        const allMenuIds = [...placeIds, ...uniqueRegisteredIds]
-
-        const [{ data: dbData }, { data: menuData }] = await Promise.all([
-          placeIds.length ? supabase.from('restaurants').select('*').in('kakao_id', placeIds) : Promise.resolve({ data: [] }),
-          allMenuIds.length ? supabase.from('restaurant_menus').select('*').in('kakao_id', allMenuIds) : Promise.resolve({ data: [] }),
-        ])
-
-        const menuMap = {}
-        menuData?.forEach((m) => {
-          if (!menuMap[m.kakao_id]) menuMap[m.kakao_id] = []
-          menuMap[m.kakao_id].push(m)
-        })
-
-        const kakaoMerged = categoryFiltered.map((r) => {
-          const extra = dbData?.find((d) => d.kakao_id === r.id)
-          const menus = menuMap[r.id]?.filter((m) => m.price) || []
-          const mainMenu = !isCafe(r) && menus.length > 0 ? menus[0] : null
-          const cheapMenu = mainMenu && mainMenu.price <= 8000 ? mainMenu : null
-          return {
-            ...r,
-            ...extra,
-            place_url: extra?.place_url || r.place_url,
-            kakao_id: r.id,
-            _menus: menuMap[r.id] || [],
-            ...(cheapMenu && { _isCheap: true, _cheapPrice: cheapMenu.price }),
-          }
-        })
-
-        const registeredMerged = uniqueRegistered.map((r) => {
-          const menus = menuMap[r.kakao_id]?.filter((m) => m.price) || []
-          const mainMenu = !isCafe(r) && menus.length > 0 ? menus[0] : null
-          const cheapMenu = mainMenu && mainMenu.price <= 8000 ? mainMenu : null
-          return { ...r, _menus: menuMap[r.kakao_id] || [], ...(cheapMenu && { _isCheap: true, _cheapPrice: cheapMenu.price }) }
-        })
-
-        merged = filterByPrice([...kakaoMerged, ...geojipList, ...registeredMerged], priceRangeRef.current, menuMap)
-      }
-
-      updateOverlays(merged)
-      fetchTop10InArea()
-    } catch (e) {
-      console.error(e)
-    }
-    setSearching(false)
-  }
-
   function updateOverlays(list) {
     const { kakao } = window
     if (!kakaoMap.current) return
@@ -337,11 +338,28 @@ export default function MapPage() {
     })
   }
 
+  useEffect(() => {
+    const init = async () => {
+      await initMap()
+    }
+    init()
+
+    const handler = (e) => { e.preventDefault(); setInstallPrompt(e) }
+    window.addEventListener('beforeinstallprompt', handler)
+    window.addEventListener('appinstalled', () => setInstalled(true))
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler)
+      overlaysRef.current.forEach((o) => o.setMap(null))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function reloadMap() {
     if (!kakaoMap.current) return
     const center = kakaoMap.current.getCenter()
     fetchRestaurants(center.getLat(), center.getLng())
   }
+
 
   function changeCategory(c) {
     setCategory(c)
@@ -381,9 +399,9 @@ export default function MapPage() {
           {PRICE_RANGES.map((p) => (
             <button key={p} onClick={() => changePriceRange(p)}
               className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm ${
-                priceRange === p ? 'bg-blue-500 text-white' : 'bg-white text-gray-500 border border-gray-200'
+                priceRange === p ? 'bg-green-600 text-white' : 'bg-white text-gray-500 border border-gray-200'
               }`}>
-              {p}
+         {p}
             </button>
           ))}
         </div>
@@ -397,11 +415,18 @@ export default function MapPage() {
             🍱 점심 간편식
           </button>
           <button
-            onClick={() => { const n = !geojipOnly; setGeojipOnly(n); geojipOnlyRef.current = n; reloadMap() }}
+            onClick={() => { const n = !geojipOnly; setGeojipOnly(n); geojipOnlyRef.current = n; if (n) { setDietOnly(false); dietOnlyRef.current = false; } reloadMap() }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm border ${
               geojipOnly ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-500 border-gray-200'
             }`}>
             💰 가성비만
+          </button>
+          <button
+            onClick={() => { const n = !dietOnly; setDietOnly(n); dietOnlyRef.current = n; if (n) { setLunchOnly(false); lunchOnlyRef.current = false; setGeojipOnly(false); geojipOnlyRef.current = false; } reloadMap() }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm border ${
+              dietOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-500 border-gray-200'
+            }`}>
+            🥗 다이어터
           </button>
         </div>
       </div>
@@ -449,14 +474,31 @@ export default function MapPage() {
           </div>
           <div className="divide-y divide-gray-50 max-h-64 overflow-y-auto">
             {top10.map((r, i) => (
-              <div key={r.kakao_id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer"
-                onClick={() => setSelected({ ...r, place_name: r.name, y: r.lat, x: r.lng, road_address_name: r.address, category_name: r.category })}>
+              <div key={r.kakao_id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
                 <span className={`text-xs font-bold w-4 shrink-0 ${i < 3 ? 'text-orange-500' : 'text-gray-400'}`}>{i + 1}</span>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0" onClick={() => setSelected({ ...r, place_name: r.name, y: r.lat, x: r.lng, road_address_name: r.address, category_name: r.category })}>
                   <p className="text-xs font-semibold text-gray-800 truncate">{r.name}</p>
-                  <p className="text-xs text-gray-400 truncate">{r.category?.split(' > ').slice(-1)[0]}</p>
+                  <p className="text-[10px] text-gray-400 truncate">{r.category?.split(' > ').slice(-1)[0]}</p>
                 </div>
-                <span className="text-xs text-blue-500 font-bold shrink-0">👍{r.votes_up}</span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-[10px] text-blue-500 font-bold shrink-0">👍{r.votes_up}</span>
+                  <a
+                    href={(() => {
+                      const name = r.name
+                      const addr = r.address || ''
+                      const q = encodeURIComponent(name + ' ' + addr.split(' ').slice(0, 3).join(' '))
+                      const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+                      if (isMobile && r.place_url) return r.place_url
+                      return `https://map.naver.com/v5/search/${q}`
+                    })()}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-[9px] text-gray-400 underline"
+                  >
+                    지도
+                  </a>
+                </div>
               </div>
             ))}
           </div>
@@ -472,7 +514,7 @@ export default function MapPage() {
             if (outcome === 'accepted') setInstalled(true)
             setInstallPrompt(null)
           }}
-          className="absolute bottom-32 right-4 z-10 bg-orange-500 text-white rounded-full px-3 py-2 shadow-lg flex items-center gap-1.5 text-xs font-medium"
+          className="absolute bottom-36 right-4 z-[40] bg-orange-500 text-white rounded-full px-3 py-2 shadow-lg flex items-center gap-1.5 text-xs font-medium"
         >
           <Download size={14} />
           앱 설치
@@ -508,14 +550,16 @@ export default function MapPage() {
       )}
 
       <button onClick={goToMyLocation}
-        className="absolute right-4 z-10 bg-white rounded-full p-3 shadow-lg border border-gray-100"
-        style={{ bottom: 'calc(72px + env(safe-area-inset-bottom))' }}>
+        className={`absolute right-4 z-[40] bg-white rounded-full p-3 shadow-lg border border-gray-100 transition-all ${
+          isStandalone ? 'bottom-[calc(130px+env(safe-area-inset-bottom))]' : 'bottom-[calc(90px+env(safe-area-inset-bottom))]'
+        }`}>
         <LocateFixed size={20} className="text-orange-500" />
       </button>
 
       <button onClick={() => setShowAddModal(true)}
-        className="absolute left-4 z-10 bg-orange-500 text-white rounded-full px-4 py-2.5 shadow-lg flex items-center gap-1.5 text-sm font-medium"
-        style={{ bottom: 'calc(72px + env(safe-area-inset-bottom))' }}>
+        className={`absolute left-4 z-[40] bg-orange-500 text-white rounded-full px-4 py-2.5 shadow-lg flex items-center gap-1.5 text-sm font-medium transition-all ${
+          isStandalone ? 'bottom-[calc(130px+env(safe-area-inset-bottom))]' : 'bottom-[calc(90px+env(safe-area-inset-bottom))]'
+        }`}>
         <Plus size={16} />
         식당 등록
       </button>

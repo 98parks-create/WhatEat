@@ -14,18 +14,21 @@ const navItems = [
 function useLunchBanner() {
   const [show, setShow] = useState(false)
 
-  useEffect(() => {
-    const h = new Date().getHours()
-    const m = new Date().getMinutes()
-    const isLunchTime = (h === 11 && m >= 30) || h === 12 || (h === 13 && m <= 30)
-    const dismissed = sessionStorage.getItem('whateat_banner_dismissed')
-    if (isLunchTime && !dismissed) setShow(true)
-  }, [])
-
   function dismiss() {
     sessionStorage.setItem('whateat_banner_dismissed', '1')
     setShow(false)
   }
+
+  useEffect(() => {
+    const checkLunch = async () => {
+      const h = new Date().getHours()
+      const m = new Date().getMinutes()
+      const isLunchTime = (h === 11 && m >= 30) || h === 12 || (h === 13 && m <= 30)
+      const dismissed = sessionStorage.getItem('whateat_banner_dismissed')
+      if (isLunchTime && !dismissed) setShow(true)
+    }
+    checkLunch()
+  }, [])
 
   return { show, dismiss }
 }
@@ -73,25 +76,27 @@ export default function Layout({ children }) {
       )}
 
       {/* 본문 */}
-      <main className="flex-1 flex flex-col min-h-0">{children}</main>
+      <main className="flex-1 flex flex-col min-h-0 relative mb-[env(safe-area-inset-bottom)]">{children}</main>
 
-      {/* 하단 네비게이션 */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex z-50" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {navItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              `flex-1 flex flex-col items-center py-2 gap-0.5 text-xs transition-colors ${
-                isActive ? 'text-orange-500' : 'text-gray-400'
-              }`
-            }
-          >
-            <Icon size={22} />
-            {label}
-          </NavLink>
-        ))}
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 flex z-50 pb-[env(safe-area-inset-bottom)]">
+        {navItems.map((item) => {
+          const ItemIcon = item.icon
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/'}
+              className={({ isActive }) =>
+                `flex-1 flex-col items-center py-2 gap-0.5 text-xs flex transition-colors ${
+                  isActive ? 'text-orange-500' : 'text-gray-400'
+                }`
+              }
+            >
+              <ItemIcon size={22} />
+              {item.label}
+            </NavLink>
+          )
+        })}
       </nav>
 
       {showFreeBoard && <FreeBoardModal onClose={() => setShowFreeBoard(false)} />}

@@ -29,28 +29,47 @@ export default function VotePage() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
 
-  // 실시간 투표 구독
-  useEffect(() => {
-    if (!room) return
+  function getCurrentPosition() {
+    return new Promise((resolve, reject) =>
+      navigator.geolocation.getCurrentPosition(
+        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+        reject
+      )
+    )
+  }
 
-    const channel = supabase
-      .channel(`room:${room.id}`)
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'room_votes',
-        filter: `room_id=eq.${room.id}`,
-      }, () => {
-        fetchVotes(room.id)
-      })
-      .subscribe()
+  async function fetchCandidates(roomId) {
+    const { data } = await supabase
+      .from('room_candidates')
+      .select('*')
+      .eq('room_id', roomId)
+    setCandidates(data || [])
+  }
 
-    fetchVotes(room.id)
-    fetchCandidates(room.id)
-    fetchMembers(room.id)
+  async function fetchVotes(roomId) {
+    const { data } = await supabase
+      .from('room_votes')
+      .select('candidate_id, nickname')
+      .eq('room_id', roomId)
 
-    return () => supabase.removeChannel(channel)
-  }, [room])
+    const tally = {}
+    const memberSet = new Set()
+    data?.forEach((v) => {
+      tally[v.candidate_id] = (tally[v.candidate_id] || 0) + 1
+      memberSet.add(v.nickname)
+    })
+    setVotes(tally)
+    setMembers([...memberSet])
+  }
+
+  async function fetchMembers(roomId) {
+    const { data } = await supabase
+      .from('room_votes')
+      .select('nickname')
+      .eq('room_id', roomId)
+    const unique = [...new Set(data?.map((v) => v.nickname) || [])]
+    setMembers(unique)
+  }
 
   async function createRoom() {
     if (!nickname.trim()) return
@@ -116,57 +135,56 @@ export default function VotePage() {
     setLoading(false)
   }
 
-  async function fetchCandidates(roomId) {
-    const { data } = await supabase
-      .from('room_candidates')
-      .select('*')
-      .eq('room_id', roomId)
-    setCandidates(data || [])
-  }
+  // 실시간 투표 구독
+  useEffect(() => {
+    if (!room) return
 
-  async function fetchVotes(roomId) {
-    const { data } = await supabase
-      .from('room_votes')
-      .select('candidate_id, nickname')
-      .eq('room_id', roomId)
+    let activeChannel = null
 
-    const tally = {}
-    const memberSet = new Set()
-    data?.forEach((v) => {
-      tally[v.candidate_id] = (tally[v.candidate_id] || 0) + 1
-      memberSet.add(v.nickname)
-    })
-    setVotes(tally)
-    setMembers([...memberSet])
-  }
+    const init = async () => {
+      activeChannel = supabase
+        .channel(`room:${room.id}`)
+        .on('postgres_changes', {
+          event: '*',
+          schema: 'public',
+          table: 'room_votes',
+          filter: `room_id=eq.${room.id}`,
+        }, () => {
+          fetchVotes(room.id)
+        })
+        .subscribe()
 
-  async function fetchMembers(roomId) {
-    const { data } = await supabase
-      .from('room_votes')
-      .select('nickname')
-      .eq('room_id', roomId)
-    const unique = [...new Set(data?.map((v) => v.nickname) || [])]
-    setMembers(unique)
-  }
+      await fetchVotes(room.id)
+      await fetchCandidates(room.id)
+      await fetchMembers(room.id)
+    }
+
+    init()
+
+    return () => {
+      if (activeChannel) supabase.removeChannel(activeChannel)
+    }
+  }, [room])
 
   async function castVote(candidateId) {
-    if (!room || myVote === candidateId) return
+    if (!room || !nickname.trim()) return
+    const prevVote = myVote
     setMyVote(candidateId)
 
-    await supabase
-      .from('room_votes')
-      .delete()
-      .eq('room_id', room.id)
-      .eq('nickname', nickname)
-
-    await supabase.from('room_votes').insert({
-      room_id: room.id,
-      candidate_id: candidateId,
-      nickname,
-    })
-
-    // Realtime 미작동 대비 즉시 갱신
-    fetchVotes(room.id)
+    try {
+      if (prevVote) {
+        await supabase.from('room_votes').delete().eq('room_id', room.id).eq('nickname', nickname)
+      }
+      await supabase.from('room_votes').insert({
+        room_id: room.id,
+        candidate_id: candidateId,
+        nickname: nickname,
+      })
+      fetchVotes(room.id)
+    } catch {
+      alert('투표에 실패했어요.')
+      setMyVote(prevVote)
+    }
   }
 
   function copyCode() {
@@ -176,28 +194,19 @@ export default function VotePage() {
   }
 
   async function shareRoom() {
-    const text = `🍽️ 오늘 점심 같이 정해요!\nWhatEat 팀 투표에 참여해주세요.\n\n방 코드: ${roomCode}\n👉 ${window.location.origin}/vote`
+    const shareUrl = `${window.location.origin}/vote?code=${roomCode}`
     if (navigator.share) {
-      try {
-        await navigator.share({ title: 'WhatEat 팀 점심 투표', text })
-      } catch {
-        // 사용자가 취소한 경우 무시
-      }
+      navigator.share({
+        title: '오늘 점심 뭐 먹지? 투표참여',
+        text: `[WhatEat] ${nickname}님이 초대했어요! 코드: ${roomCode}`,
+        url: shareUrl,
+      })
     } else {
-      navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      copyCode()
+      alert('공유 링크가 클립보드에 복사되었어요.')
     }
   }
 
-  function getCurrentPosition() {
-    return new Promise((resolve, reject) =>
-      navigator.geolocation.getCurrentPosition(
-        (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
-        reject
-      )
-    )
-  }
 
   const totalVotes = Object.values(votes).reduce((a, b) => a + b, 0)
   const winner = candidates.reduce(
