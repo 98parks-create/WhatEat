@@ -9,11 +9,14 @@ const CATEGORIES = ['전체', '한식', '중식', '일식', '양식', '분식']
 const PRICE_RANGES = ['전체', '~8천원', '~10천원', '~15천원', '~25천원']
 const PERSON_COUNTS = ['1인', '2-4명', '5-9명', '10명+']
 
-function getKeyword(category, persons, isDinner) {
+function getKeyword(category, persons, isDinner, dietOnly) {
   if (isDinner) return PERSON_COUNTS.indexOf(persons) >= 2 ? '고깃집' : '삼겹살'
+  if (dietOnly && category === '전체') return '샐러드'
   if (category !== '전체') return category
   return '음식점'
 }
+
+const DIET_KEYWORDS = ['샐러드', '포케', '샌드위치', '그릭요거트', '서브웨이', '다이어트', '건강식', '키토']
 
 function getRadius() {
   return 500 // 사용자 요청: 500m 고정 (도보 10분 내외)
@@ -28,6 +31,7 @@ export default function RoulettePage() {
   const [persons, setPersons] = useState('1인')
   const [isDinner, setIsDinner] = useState(false)
   const [lunchOnly, setLunchOnly] = useState(true)
+  const [dietOnly, setDietOnly] = useState(false)
   const [geojipOnly, setGeojipOnly] = useState(false)
   const [showFilter, setShowFilter] = useState(false)
   const [history, setHistory] = useState([])
@@ -73,7 +77,7 @@ export default function RoulettePage() {
         pos = await getCurrentPosition()
       }
 
-      const keyword = getKeyword(category, persons, isDinner)
+      const keyword = getKeyword(category, persons, isDinner, dietOnly)
       const radius = getRadius(persons, isDinner)
 
       let pool = []
@@ -121,6 +125,12 @@ export default function RoulettePage() {
             menuMap[m.kakao_id].push(m)
           })
           results = filterByPrice(results, priceRange, menuMap)
+        }
+
+        if (dietOnly) {
+          results = results.filter((r) =>
+            DIET_KEYWORDS.some((kw) => (r.category_name || '').includes(kw) || (r.place_name || '').includes(kw))
+          )
         }
 
         pool = results
@@ -219,6 +229,7 @@ export default function RoulettePage() {
     persons !== '1인' && persons,
     isDinner && '회식',
     lunchOnly && !isDinner && '점심간편식',
+    dietOnly && !isDinner && '다이어터',
     geojipOnly && '가성비만',
   ].filter(Boolean).join(' · ')
 
@@ -325,15 +336,23 @@ export default function RoulettePage() {
 
       {/* 특수 필터 */}
       {!isDinner && (
-        <div className="flex gap-2 mb-3">
-          <button onClick={() => setLunchOnly(!lunchOnly)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
-              lunchOnly ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-600 border-gray-200'
-            }`}>
-            🍱 점심 간편식
-          </button>
-          <button onClick={() => setGeojipOnly(!geojipOnly)}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+        <div className="flex flex-col gap-2 mb-3">
+          <div className="flex gap-2">
+            <button onClick={() => { setLunchOnly(!lunchOnly); if (!lunchOnly) setDietOnly(false) }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                lunchOnly ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-600 border-gray-200'
+              }`}>
+              🍱 점심 간편식
+            </button>
+            <button onClick={() => { setDietOnly(!dietOnly); if (!dietOnly) { setLunchOnly(false); setGeojipOnly(false) } }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
+                dietOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-600 border-gray-200'
+              }`}>
+              🥗 다이어터
+            </button>
+          </div>
+          <button onClick={() => { setGeojipOnly(!geojipOnly); if (!geojipOnly) setDietOnly(false) }}
+            className={`w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium border transition-colors ${
               geojipOnly ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-600 border-gray-200'
             }`}>
             💰 가성비만
@@ -476,9 +495,9 @@ export default function RoulettePage() {
           </>
         ) : (
           <div className="text-center py-6">
-            <div className="text-5xl mb-3">{isDinner ? '🍻' : geojipOnly ? '💰' : '🎲'}</div>
+            <div className="text-5xl mb-3">{isDinner ? '🍻' : dietOnly ? '🥗' : geojipOnly ? '💰' : '🎲'}</div>
             <p className="text-gray-400 text-sm">
-              {isDinner ? `${persons} 회식장소를 찾아드려요` : geojipOnly ? '주변 가성비 식당을 찾아드려요' : '버튼을 눌러 오늘 점심을 결정해요'}
+              {isDinner ? `${persons} 회식장소를 찾아드려요` : dietOnly ? '가벼운 식단을 찾아드려요' : geojipOnly ? '주변 가성비 식당을 찾아드려요' : '버튼을 눌러 오늘 점심을 결정해요'}
             </p>
           </div>
         )}
@@ -493,7 +512,7 @@ export default function RoulettePage() {
           : 'bg-orange-500 text-white active:scale-95'
         } disabled:opacity-50`}>
         <Shuffle size={22} className={spinning ? 'animate-spin' : ''} />
-        {spinning ? '찾는 중...' : isDinner ? '회식장소 뽑기!' : geojipOnly ? '💰 가성비 뽑기!' : '돌려돌려 룰렛!'}
+        {spinning ? '찾는 중...' : isDinner ? '회식장소 뽑기!' : dietOnly ? '🥗 식단 뽑기!' : geojipOnly ? '💰 가성비 뽑기!' : '돌려돌려 룰렛!'}
       </button>
       {locationMode === 'custom' && !customCoords && (
         <p className="text-xs text-center text-orange-400 mt-2">위치를 검색해야 룰렛을 돌릴 수 있어요</p>

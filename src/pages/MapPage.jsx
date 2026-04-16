@@ -14,6 +14,7 @@ export default function MapPage() {
   const kakaoMap = useRef(null)
   const overlaysRef = useRef([])
   const myMarkerRef = useRef(null)
+  const DIET_KEYWORDS = ['샐러드', '포케', '샌드위치', '그릭요거트', '서브웨이', '다이어트', '건강식', '키토']
   const [selected, setSelected] = useState(null)
   const [category, setCategory] = useState('전체')
   const categoryRef = useRef('전체')
@@ -28,6 +29,8 @@ export default function MapPage() {
   const lunchOnlyRef = useRef(true)
   const [geojipOnly, setGeojipOnly] = useState(false)
   const geojipOnlyRef = useRef(false)
+  const [dietOnly, setDietOnly] = useState(false)
+  const dietOnlyRef = useRef(false)
   const selectedRef = useRef(null)
   const [installPrompt, setInstallPrompt] = useState(null)
   const [installed, setInstalled] = useState(false)
@@ -113,7 +116,9 @@ export default function MapPage() {
 
       let kakaoResults = []
       if (!geojipOnlyRef.current) {
-        const keyword = categoryRef.current === '전체' ? '음식점' : categoryRef.current
+        let keyword = categoryRef.current === '전체' ? '음식점' : categoryRef.current
+        if (dietOnlyRef.current && categoryRef.current === '전체') keyword = '샐러드'
+        
         kakaoResults = await searchNearbyRestaurants({
           lat, lng, radius: 1500, keyword, dinnerMode: !lunchOnlyRef.current,
           mapInstance: kakaoMap.current,
@@ -180,6 +185,13 @@ export default function MapPage() {
       // 가성비만 모드일 경우 필터링
       if (geojipOnlyRef.current) {
         allMerged = allMerged.filter(r => r._isCheap)
+      }
+
+      // 다이어터 모드일 경우 필터링
+      if (dietOnlyRef.current) {
+        allMerged = allMerged.filter(r => 
+          DIET_KEYWORDS.some(kw => (r.category_name || '').includes(kw) || (r.place_name || '').includes(kw))
+        )
       }
 
       // 최종 가격대 필터링
@@ -403,11 +415,18 @@ export default function MapPage() {
             🍱 점심 간편식
           </button>
           <button
-            onClick={() => { const n = !geojipOnly; setGeojipOnly(n); geojipOnlyRef.current = n; reloadMap() }}
+            onClick={() => { const n = !geojipOnly; setGeojipOnly(n); geojipOnlyRef.current = n; if (n) { setDietOnly(false); dietOnlyRef.current = false; } reloadMap() }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm border ${
               geojipOnly ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-500 border-gray-200'
             }`}>
             💰 가성비만
+          </button>
+          <button
+            onClick={() => { const n = !dietOnly; setDietOnly(n); dietOnlyRef.current = n; if (n) { setLunchOnly(false); lunchOnlyRef.current = false; setGeojipOnly(false); geojipOnlyRef.current = false; } reloadMap() }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors shadow-sm border ${
+              dietOnly ? 'bg-green-500 text-white border-green-500' : 'bg-white text-gray-500 border-gray-200'
+            }`}>
+            🥗 다이어터
           </button>
         </div>
       </div>
