@@ -158,11 +158,9 @@ create policy "public update" on free_posts for update using (true);
 alter table post_comments enable row level security;
 create policy "public read" on post_comments for select using (true);
 create policy "public insert" on post_comments for insert with check (true);
-
 -- reviews RLS
 alter table reviews enable row level security;
 create policy "public read" on reviews for select using (true);
 create policy "public insert" on reviews for insert with check (true);
-
 -- restaurant_menus delete (메뉴 삭제 기능용)
 create policy "public delete" on restaurant_menus for delete using (true);
